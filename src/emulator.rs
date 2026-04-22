@@ -1,7 +1,10 @@
 use crate::command::CommandRunner;
 use crate::config::Config;
-use anyhow::{bail, Result};
+use anstream::println;
+use anyhow::{Result, bail};
 use clap::{Args, Subcommand};
+use clap_complete::engine::ArgValueCompleter;
+use owo_colors::OwoColorize;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
@@ -14,23 +17,25 @@ pub struct EmulatorArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum EmulatorCommands {
-    /// Start an emulator
+    /// Start an emulator instance
     Start(StartArgs),
     /// Stop a running emulator
     Stop(StopArgs),
-    /// List all emulators
+    /// List all available emulators
     List(ListArgs),
 }
 
 #[derive(Args, Debug)]
 pub struct StartArgs {
-    /// Emulator name
+    /// Name of the emulator to start
+    #[arg(add = ArgValueCompleter::new(crate::completion::complete_emulators))]
     pub name: String,
 }
 
 #[derive(Args, Debug)]
 pub struct StopArgs {
-    /// Emulator name
+    /// Name of the emulator to stop
+    #[arg(add = ArgValueCompleter::new(crate::completion::complete_emulators))]
     pub name: String,
     /// Force stop (kill process)
     #[arg(short, long)]
@@ -49,7 +54,7 @@ pub fn handle_emulator(args: EmulatorArgs) -> Result<()> {
 }
 
 fn handle_start(args: StartArgs) -> Result<()> {
-    println!("Starting emulator '{}'...", args.name);
+    println!("{:>9} ({})", "Starting".green().bold(), args.name);
 
     let emulator_cmd = find_emulator_binary()?;
     let config = Config::load(None)?;
@@ -63,9 +68,8 @@ fn handle_start(args: StartArgs) -> Result<()> {
             "-path".to_string(),
             instance_path.to_str().unwrap().to_string(),
         ]);
-        println!("  Instance path: {}", instance_path.display());
     } else {
-        bail!("Could not find emulator instance path. Please configure it via 'heco setup'");
+        bail!("Could not find emulator instance path. Please configure it via 'heco env'");
     }
 
     // 添加模拟器镜像路径
@@ -74,9 +78,8 @@ fn handle_start(args: StartArgs) -> Result<()> {
             "-imageRoot".to_string(),
             image_root.to_str().unwrap().to_string(),
         ]);
-        println!("  Image root: {}", image_root.display());
     } else {
-        bail!("Could not find emulator image root. Please configure it via 'heco setup'");
+        bail!("Could not find emulator image root. Please configure it via 'heco env'");
     }
 
     // 创建 CommandRunner
@@ -84,6 +87,7 @@ fn handle_start(args: StartArgs) -> Result<()> {
 
     // 执行命令并设置超时
     let timeout = Duration::from_secs(2);
+    let start_time = std::time::Instant::now();
 
     // 启动命令执行
     let cmd_args_slice: Vec<&str> = cmd_args.iter().map(|s| s.as_str()).collect();
@@ -93,18 +97,33 @@ fn handle_start(args: StartArgs) -> Result<()> {
         Some(timeout),
     )?;
 
+    let elapsed = start_time.elapsed();
+    let elapsed_seconds = elapsed.as_secs() as f64 + elapsed.subsec_millis() as f64 / 1000.0;
+
     // 处理执行结果
     let output_str = String::from_utf8_lossy(&output.stdout);
 
     if output.status.success() {
         if output_str.contains("already exist") || output_str.contains("already running") {
-            println!("⚠️  Emulator '{}' is already running", args.name);
+            println!(
+                "{:>9} Emulator '{}' is already running",
+                "⚠️".yellow(),
+                args.name
+            );
         } else {
-            println!("✓ Emulator '{}' started successfully", args.name);
+            println!(
+                "{:>9} in {:.2}s",
+                "Finished".green().bold(),
+                elapsed_seconds
+            );
         }
     } else {
         if output_str.contains("already exist") || output_str.contains("already running") {
-            println!("⚠️  Emulator '{}' is already running", args.name);
+            println!(
+                "{:>9} Emulator '{}' is already running",
+                "⚠️".yellow(),
+                args.name
+            );
         } else {
             bail!("Failed to start emulator: {}", output_str.trim());
         }
@@ -114,30 +133,37 @@ fn handle_start(args: StartArgs) -> Result<()> {
 }
 
 fn handle_stop(args: StopArgs) -> Result<()> {
-    println!("Stopping emulator '{}'...", args.name);
+    println!("{:>9} ({})", "Stopping".green().bold(), args.name);
 
     let emulator_cmd = find_emulator_binary()?;
+    let start_time = std::time::Instant::now();
 
     let mut cmd = Command::new(&emulator_cmd);
     cmd.arg("-stop").arg(&args.name);
 
     if args.force {
-        println!("  Force stopping...");
+        println!("{:>9} Force stopping...", "".white());
     }
 
     let output = cmd.output()?;
+    let elapsed = start_time.elapsed();
+    let elapsed_seconds = elapsed.as_secs() as f64 + elapsed.subsec_millis() as f64 / 1000.0;
 
     if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if !stdout.trim().is_empty() {
-            println!("{}", stdout);
-        }
-        println!("✓ Emulator '{}' stopped successfully", args.name);
+        println!(
+            "{:>9} in {:.2}s",
+            "Finished".green().bold(),
+            elapsed_seconds
+        );
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        // 如果模拟器已经停止，不算错误
+        // If emulator is already stopped, it's not an error
         if stderr.contains("not running") || stderr.contains("stopped") {
-            println!("✓ Emulator '{}' is already stopped", args.name);
+            println!(
+                "{:>9} Emulator '{}' is already stopped",
+                "⚠️".yellow(),
+                args.name
+            );
         } else {
             bail!("Failed to stop emulator: {}", stderr);
         }
@@ -146,9 +172,7 @@ fn handle_stop(args: StopArgs) -> Result<()> {
     Ok(())
 }
 
-fn handle_list(_args: ListArgs) -> Result<()> {
-    println!("Emulators:");
-
+pub fn get_emulator_list() -> Result<Vec<String>> {
     let emulator_cmd = find_emulator_binary()?;
 
     let mut cmd = Command::new(&emulator_cmd);
@@ -158,33 +182,33 @@ fn handle_list(_args: ListArgs) -> Result<()> {
 
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let lines: Vec<&str> = stdout.lines().collect();
+        let mut emulators = Vec::new();
 
-        if lines.is_empty() || stdout.trim().is_empty() {
-            println!("  No emulators found.");
-            return Ok(());
-        }
-
-        let mut found_any = false;
-
-        // 解析输出并显示
-        for line in lines {
+        for line in stdout.lines() {
             let line = line.trim();
-            if line.is_empty() {
-                continue;
+            if !line.is_empty() {
+                emulators.push(line.to_string());
             }
+        }
 
-            // 原生命令输出格式就是模拟器名称，如 "Mate 80"
-            let name = line;
-            found_any = true;
-            println!("  {}", name);
-        }
-        if !found_any {
-            println!("  No emulators found.");
-        }
+        Ok(emulators)
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("Failed to list emulators: {}", stderr);
+    }
+}
+
+fn handle_list(_args: ListArgs) -> Result<()> {
+    println!("Emulators:");
+
+    let emulators = get_emulator_list()?;
+
+    if emulators.is_empty() {
+        println!("  No emulators found.");
+    } else {
+        for name in emulators {
+            println!("  {}", name);
+        }
     }
 
     Ok(())
@@ -199,6 +223,7 @@ fn find_emulator_binary() -> Result<PathBuf> {
         return Ok(emulator_path);
     }
 
-    bail!("Could not find Emulator binary. Please ensure DevEco Studio is installed and configured in heco setup, or set DEVECO_STUDIO_ROOT environment variable.")
+    bail!(
+        "Could not find Emulator binary. Please ensure DevEco Studio is installed and configured in heco env."
+    )
 }
-

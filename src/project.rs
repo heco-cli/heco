@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +28,7 @@ pub struct Module {
     pub name: String,
     pub module_type: ModuleType,
     pub targets: Vec<String>,
+    pub src_path: String,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +53,10 @@ struct App {
 #[derive(Debug, Deserialize)]
 struct Product {
     name: String,
+    #[serde(rename = "compileSdkVersion")]
+    compile_sdk_version: Option<serde_json::Value>,
+    #[serde(rename = "targetSdkVersion")]
+    target_sdk_version: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,6 +81,28 @@ struct ModuleJson5 {
 struct ModuleInfo {
     #[serde(rename = "type")]
     module_type: Option<String>,
+    abilities: Option<Vec<AbilityInfo>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AbilityInfo {
+    name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AppJson5 {
+    pub app: Option<AppInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AppInfo {
+    #[serde(rename = "bundleName")]
+    pub bundle_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OhPackage {
+    pub dependencies: Option<HashMap<String, String>>,
 }
 
 impl Module {
@@ -91,21 +119,20 @@ impl Module {
 
         let module_type = if module_path.join("src/main/module.json5").exists() {
             if let Ok(content) = std::fs::read_to_string(module_path.join("src/main/module.json5"))
+                && let Ok(json) = serde_json5::from_str::<ModuleJson5>(&content)
+                && let Some(module_info) = json.module
             {
-                if let Ok(json) = serde_json5::from_str::<ModuleJson5>(&content) {
-                    if let Some(module_info) = json.module {
-                        let module_type = module_info
-                            .module_type
-                            .as_deref()
-                            .map(ModuleType::from_str)
-                            .unwrap_or(ModuleType::Entry);
-                        return Module {
-                            name,
-                            module_type,
-                            targets,
-                        };
-                    }
-                }
+                let module_type = module_info
+                    .module_type
+                    .as_deref()
+                    .map(ModuleType::from_str)
+                    .unwrap_or(ModuleType::Entry);
+                return Module {
+                    name,
+                    module_type,
+                    targets,
+                    src_path: info.src_path.clone(),
+                };
             }
             ModuleType::Entry
         } else {
@@ -116,6 +143,7 @@ impl Module {
             name,
             module_type,
             targets,
+            src_path: info.src_path.clone(),
         }
     }
 }
@@ -202,14 +230,85 @@ impl Project {
 
     pub fn validate_product(&self, product_name: &str) -> anyhow::Result<()> {
         if self.products.is_empty() {
-            anyhow::bail!("项目中没有定义任何 product");
+            anyhow::bail!("no products defined in the project");
         }
         if !self.products.iter().any(|p| p == product_name) {
             anyhow::bail!(
-                "product '{}' 不存在\n\n可用的 products:\n  {}",
+                "product '{}' not found\n\nAvailable products:\n  {}",
                 product_name,
                 self.products.join("\n  ")
             );
+        }
+        Ok(())
+    }
+
+    pub fn get_bundle_name(&self) -> anyhow::Result<String> {
+        let app_json5_path = self.root.join("AppScope").join("app.json5");
+        if app_json5_path.exists() {
+            let content = std::fs::read_to_string(&app_json5_path)?;
+            if let Ok(json) = serde_json5::from_str::<AppJson5>(&content)
+                && let Some(app) = json.app
+                && let Some(bundle_name) = app.bundle_name
+            {
+                return Ok(bundle_name);
+            }
+        }
+        anyhow::bail!("Could not find bundleName in AppScope/app.json5")
+    }
+
+    pub fn get_main_ability(&self, module: &Module) -> anyhow::Result<String> {
+        let module_json5_path = self
+            .root
+            .join(&module.src_path)
+            .join("src/main/module.json5");
+        if module_json5_path.exists() {
+            let content = std::fs::read_to_string(&module_json5_path)?;
+            if let Ok(json) = serde_json5::from_str::<ModuleJson5>(&content)
+                && let Some(module_info) = json.module
+                && let Some(abilities) = module_info.abilities
+                && let Some(first) = abilities.first()
+                && let Some(name) = &first.name
+            {
+                return Ok(name.clone());
+            }
+        }
+        // Fallback
+        Ok("EntryAbility".to_string())
+    }
+
+    pub fn resolve_hsp_dependencies<'a>(
+        &'a self,
+        module: &Module,
+        hsp_modules: &mut Vec<&'a Module>,
+    ) -> anyhow::Result<()> {
+        let pkg_path = self.root.join(&module.src_path).join("oh-package.json5");
+        if !pkg_path.exists() {
+            return Ok(());
+        }
+
+        let content = std::fs::read_to_string(&pkg_path)?;
+        if let Ok(pkg) = serde_json5::from_str::<OhPackage>(&content)
+            && let Some(deps) = pkg.dependencies
+        {
+            for (_, path) in deps {
+                if path.starts_with("file:") {
+                    let relative_path = path.trim_start_matches("file:");
+                    let dep_dir = self.root.join(&module.src_path).join(relative_path);
+                    let dep_dir_canonical = dep_dir.canonicalize().unwrap_or(dep_dir);
+
+                    // Find which module this is
+                    if let Some(dep_module) = self.modules.iter().find(|m| {
+                        let m_dir = self.root.join(&m.src_path);
+                        m_dir.canonicalize().unwrap_or(m_dir) == dep_dir_canonical
+                    }) && dep_module.module_type == ModuleType::Shared
+                        && !hsp_modules.iter().any(|m| m.name == dep_module.name)
+                    {
+                        hsp_modules.push(dep_module);
+                        // Recursively resolve
+                        self.resolve_hsp_dependencies(dep_module, hsp_modules)?;
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -257,14 +356,54 @@ pub fn find_project_root() -> Option<PathBuf> {
         }
     }
 
-    best_root.or(Some(current_dir))
+    best_root
 }
 
 pub fn load_project() -> anyhow::Result<Project> {
-    let root = find_project_root().ok_or_else(|| anyhow::anyhow!("未找到HarmonyOS项目根目录"))?;
+    let root = find_project_root().ok_or_else(|| {
+        anyhow::anyhow!(
+            "no HMOS project root found (missing build-profile.json5 or oh-package.json5)"
+        )
+    })?;
 
     let mut project = Project::new(root);
     project.discover_modules()?;
 
     Ok(project)
+}
+
+fn extract_api_version(value: &Option<serde_json::Value>) -> Option<String> {
+    if let Some(val) = value {
+        let mut s = val.to_string().trim_matches('"').to_string();
+        // 兼容形如 "6.0.2(22)" 或 "5.0.0(12)" 的格式，从中提取出括号里的数字 "22" 或 "12"
+        if let Some(start) = s.find('(')
+            && let Some(end) = s.find(')')
+            && start < end
+        {
+            s = s[start + 1..end].to_string();
+        }
+        return Some(s);
+    }
+    None
+}
+
+pub fn get_compile_sdk_version(project_root: &Path) -> Option<String> {
+    let build_profile_path = project_root.join("build-profile.json5");
+    if !build_profile_path.exists() {
+        return None;
+    }
+
+    let content = std::fs::read_to_string(&build_profile_path).ok()?;
+    let profile: ProjectBuildProfile = serde_json5::from_str(&content).ok()?;
+
+    if let Some(product) = profile.app.products.first() {
+        if let Some(version) = extract_api_version(&product.compile_sdk_version) {
+            return Some(version);
+        }
+        if let Some(version) = extract_api_version(&product.target_sdk_version) {
+            return Some(version);
+        }
+    }
+
+    None
 }

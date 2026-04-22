@@ -21,18 +21,82 @@ impl CommandRunner {
         self
     }
 
-    pub fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<()> {
+    pub fn run_with_handler<F>(
+        &self,
+        program: &str,
+        args: &[&str],
+        mut handler: F,
+    ) -> anyhow::Result<()>
+    where
+        F: FnMut(&str),
+    {
+        let (reader, writer) = os_pipe::pipe()?;
+
         let mut cmd = Command::new(program);
-        cmd.args(args)
+        let child = cmd
+            .args(args)
             .current_dir(&self.working_dir)
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit());
+            .stdin(Stdio::null())
+            .stdout(writer.try_clone()?)
+            .stderr(writer);
 
         for (key, value) in &self.env {
-            cmd.env(key, value);
+            child.env(key, value);
         }
 
-        let status = cmd.status()?;
+        let mut child = child.spawn()?;
+
+        // 丢弃 Command 对象以关闭父进程中的管道写入端
+        drop(cmd);
+
+        // 读取输出并按行处理，同时处理回车符
+        let mut reader = BufReader::new(reader);
+        let mut line = String::new();
+
+        loop {
+            let mut buf = [0; 1024]; // 使用更大的缓冲区
+            match reader.read(&mut buf) {
+                Ok(0) => {
+                    // 管道关闭，处理剩余内容
+                    if !line.is_empty() {
+                        handler(&line);
+                    }
+                    break;
+                }
+                Ok(n) => {
+                    // 尝试将字节解码为UTF-8字符串
+                    if let Ok(s) = std::str::from_utf8(&buf[..n]) {
+                        // 处理解码后的字符串
+                        for c in s.chars() {
+                            match c {
+                                '\n' => {
+                                    // 换行符，处理完整行
+                                    if !line.is_empty() {
+                                        handler(&line);
+                                        line.clear();
+                                    }
+                                }
+                                '\r' => {
+                                    // 回车符，处理当前行（通常是进度条更新）
+                                    if !line.is_empty() {
+                                        handler(&line);
+                                        line.clear();
+                                    }
+                                }
+                                _ => {
+                                    // 普通字符，添加到当前行
+                                    line.push(c);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        // 等待子进程完成
+        let status = child.wait()?;
 
         if !status.success() {
             anyhow::bail!("命令执行失败: {} {}", program, args.join(" "));
@@ -83,7 +147,7 @@ impl CommandRunner {
             let mut reader = BufReader::new(reader);
             let mut buf = [0u8; 4096];
             let mut output = Vec::new();
-            
+
             // 持续读取直到管道关闭
             loop {
                 match reader.read(&mut buf) {
@@ -92,7 +156,7 @@ impl CommandRunner {
                     Err(_) => break,
                 }
             }
-            
+
             // 发送输出到通道
             let _ = output_tx.send(output);
         });

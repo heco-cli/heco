@@ -1,53 +1,41 @@
-# AGENTS.md - OpenCode Instructions for heco
+# AGENTS.md
 
-## Project Overview
-Rust CLI tool for creating and building HarmonyOS projects using `clap`.
+## Build & Run
 
-## Structure
-```
-heco/
-├── src/
-│   ├── main.rs      # CLI entry, command dispatcher
-│   ├── new.rs       # heco new subcommand (dialoguer prompts)
-│   ├── build.rs     # heco build subcommand
-│   ├── run.rs       # heco run subcommand
-│   ├── check.rs     # heco check subcommand
-│   ├── test.rs      # heco test subcommand
-│   └── setup.rs     # heco setup subcommand (interactive config)
+```bash
+cargo build --release
+cargo run -- <command>
 ```
 
 ## Commands
-- **Build**: `cargo build`
-- **Run**: `cargo run -- <command>`
 
-## Subcommands
-- `heco new <path> [options]` - Create new HarmonyOS project
-- `heco build [options]` - Build project modules
-- `heco run [options]` - Run on device
-- `heco check [options]` - Lint and type check
-- `heco test [options]` - Run tests
-- `heco setup [scope]` - Configure dev environment (global/project)
+- `env` - Manage environment configurations (e.g., DevEco Studio paths)
+  - `add` - Add a DevEco Studio path (auto-extracts apiVersion/version)
+  - `remove` - Remove a DevEco Studio path or version
+  - `list` - List current environment configurations
+- `build` - Build modules(s) and product(s) (supports `-m/--module` and `--products`)
+- `clean` - Clean build artifacts and uninstall application from devices (supports `--with-devices` and `--with-all-devices`)
+- `lint` - Run code linter (codelinter) and fix issues (supports `--fix` and `--products`)
+- `emulator` - Manage emulator instances (`start`, `stop`, `list`)
+- `run` - Run application on a device or emulator (supports `--daemon`, `--app-log-level`)
+- `device` - Manage device(s), include emulator and physical device (`list`)
+- `completion` - Generate shell completion scripts (supports unstable-dynamic completion)
 
-## Common Patterns
-- Subcommand handlers: `pub(crate) fn handle_<cmd>(args: <Args>)`
-- CLI definitions: `#[derive(Parser, Debug)]` + `#[command(name)]` for clap
-- Optional params: `Option<String>` or typed (e.g., `Option<u32>`)
-- `--quiet` flag: check, run, test subcommands
-- Avoid duplicate imports from same module (E0252)
+## Key Config Paths
 
-## Dependencies
-- `clap` (derive) - CLI parsing
-- `anyhow` - Error handling
-- `dialoguer` - Interactive prompts
-- `toml`, `serde` - Config serialization (TOML v1 format)
-- `dirs` - Platform config directories
+- Global: `~/.config/heco/config.toml`
 
-## Config System
-- Global base: `~/.config/heco/config.toml`
-- Project override: `.heco/config.toml`
-- Setup prompts for `deveco_studio_root`, `command_line_tools_root`, `java_home`
-- Java auto-detection via `JAVA_HOME` and PATH
+Available in config:
+- `env` block containing:
+  - `deveco-studios` - A mapping of API versions to their DevEco Studio config/paths
+  - `default-deveco-studio` - Fallback/default DevEco Studio path
 
-## Notes
-- `setup_design.md` documents the config design specification
-- HarmonyOS-specific knowledge comes from MCP server in `opencode.json`
+## Architecture
+
+- **CLI Framework**: Rust CLI using `clap` with `clap_complete` dynamic shell completion
+- **Adapters**: `hvigor`, `hdc` (Device interaction), `hilog` (Log streaming)
+- **Configuration**: Exclusively user-level global config (no project-level `.heco` config anymore). Path expansion supports `~` (tilde)
+- **Auto-Detection**: 
+  - Parses `build-profile.json5` and `oh-package.json5` to ensure command execution within valid HMOS projects
+  - Auto-detects DevEco Studio at default macOS/Windows paths
+  - Auto-extracts SDK and toolchain paths directly from DevEco Studio installation directory

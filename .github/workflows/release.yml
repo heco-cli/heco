@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub Release
+        uses: taiki-e/create-gh-release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-assets:
+    name: Upload Assets
+    needs: create-release
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-13
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and Upload
+        uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: heco
+          target: ${{ matrix.target }}
+          archive: $bin-$tag-$target
+          tar: all
+          zip: windows
+          include: LICENSE,README.md
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  update-homebrew:
+    name: Update Homebrew Tap
+    needs: upload-assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: heco-cli/homebrew-tap
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Formula
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Updating formula for version $VERSION"
+          
+          # Determine which formula to update
+          FORMULA_FILE="Formula/heco.rb"
+          if [[ "$VERSION" == *"-beta"* ]]; then
+            echo "Beta release detected, updating heco@beta.rb"
+            FORMULA_FILE="Formula/heco@beta.rb"
+          fi
+          
+          # Download the release assets to calculate sha256
+          curl -sL "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/heco-v${VERSION}-x86_64-apple-darwin.tar.gz" -o intel.tar.gz
+          curl -sL "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/heco-v${VERSION}-aarch64-apple-darwin.tar.gz" -o arm.tar.gz
+          
+          SHA_INTEL=$(sha256sum intel.tar.gz | awk '{print $1}')
+          SHA_ARM=$(sha256sum arm.tar.gz | awk '{print $1}')
+          
+          echo "Intel SHA: $SHA_INTEL"
+          echo "ARM SHA: $SHA_ARM"
+          
+          cd homebrew-tap
+          
+          # Use sed to update version and sha256
+          sed -i "s/version \".*\"/version \"${VERSION}\"/" $FORMULA_FILE
+          sed -i "s/sha256 \".*\" # MAC_INTEL/sha256 \"${SHA_INTEL}\" # MAC_INTEL/" $FORMULA_FILE
+          sed -i "s/sha256 \".*\" # MAC_ARM/sha256 \"${SHA_ARM}\" # MAC_ARM/" $FORMULA_FILE
+          
+          # Commit and push
+          git config user.name "Ockham Liu"
+          git config user.email "ockhamliu@outlook.com"
+          git add $FORMULA_FILE
+          git commit -m "chore(release): bump version to ${VERSION} in $FORMULA_FILE"
+          git push origin main
