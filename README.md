@@ -1,18 +1,17 @@
-<br />
 
 # HecO
 
-**The HMOS app development tool built for you and AI.**
+**The HMOS app development tool built for you and your AI.**
 
 [![Rust](https://img.shields.io/badge/rust-1.60%2B-blue.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg)]()
+[![Homebrew](https://img.shields.io/badge/homebrew-tap-orange.svg?logo=homebrew)](https://github.com/heco-cli/homebrew-tap)
 
-</div>
 
-Heco (HMOS Ecosystem CLI) 深度整合了 `hvigor`、`hdc` 等 DevEco Studio 工具链，并提供便捷的命令行补全，方便鸿蒙应用开发者和AI调用。
+`HecO`是用于鸿蒙/HarmomyOS应用开发的命令行工具，并提供便捷的命令行提示及补全，方便鸿蒙应用开发者和AI调用。
 
-> **⚠️ 注意**：Heco 处于快速迭代阶段，命令行参数及输出格式可能会频繁更新。强烈建议在终端中使用 `heco --help` 或依赖 Shell 自动补全功能，来获取最新、最准确的参数格式和使用说明。
+> **⚠️ 注意**：`HecO` 处于快速迭代阶段，命令行参数及输出格式可能会频繁更新。强烈建议在终端中使用 `heco --help` 或依赖 Shell 自动补全功能，来获取最新、最准确的参数格式和使用说明。
 
 ## ✨ 核心特性
 
@@ -38,10 +37,10 @@ brew install heco
 
 ### 从源码安装
 
-依赖 Rust环境
+依赖`Rust`环境
 
 ```bash
-git clone git@gitcode.com:heco/heco.git
+git clone git@github.com:heco-cli/heco.git
 cd heco
 cargo install --path .
 ```
@@ -149,8 +148,6 @@ HecO 配置文件采用 TOML 格式（强制 **kebab-case** 规范）。
 ## 🤝 参与贡献
 
 欢迎提交 Issue 和 Pull Request！
-
-> **开发注记**：由于开发环境可能处于沙箱中，在测试 `heco run` 和真实设备交互构建相关的底层命令时，请务必在真实终端环境执行验证。添加新的 CLI 参数时，推荐使用 `clap` 的特性（如 `value_delimiter = ','` 多值解析和 `clap_complete` 的 `unstable-dynamic` 动态补全）。
 
 ## 📄 许可证
 
