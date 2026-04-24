@@ -1,0 +1,23 @@
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          release-type: rust
+          # IMPORTANT: To trigger the existing release.yml (which listens for tag pushes),
+          # you MUST use a Personal Access Token (PAT) instead of the default GITHUB_TOKEN.
+          # Create a Fine-grained PAT with 'Contents: read & write' for this repo
+          # and save it as RELEASE_PLEASE_TOKEN in your GitHub Actions secrets.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
