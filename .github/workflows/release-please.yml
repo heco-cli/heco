@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   release-please:
+    if: github.repository == 'heco-cli/heco'
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4

@@ -138,9 +138,8 @@ fn run_codelinter(
 }
 
 pub fn handle_lint(args: LintArgs) -> Result<()> {
-    let project_root = find_project_root().context(
-        "no HMOS project root found (missing build-profile.json5 or oh-package.json5)",
-    )?;
+    let project_root = find_project_root()
+        .context("no HMOS project root found (missing build-profile.json5 or oh-package.json5)")?;
 
     let project = load_project().context("failed to load project info")?;
 

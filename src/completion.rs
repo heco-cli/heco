@@ -110,10 +110,9 @@ pub fn handle_completion(args: CompletionArgs) -> Result<()> {
                 "heco",
                 "heco", // completer is the CLI binary itself
                 &mut std::io::stdout(),
-            ) {
-                if e.kind() != std::io::ErrorKind::BrokenPipe {
-                    return Err(e.into());
-                }
+            ) && e.kind() != std::io::ErrorKind::BrokenPipe
+            {
+                return Err(e.into());
             }
         }
         None => {
