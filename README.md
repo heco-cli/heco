@@ -7,6 +7,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg)]()
 [![Homebrew](https://img.shields.io/badge/homebrew-tap-orange.svg?logo=homebrew)](https://github.com/heco-cli/homebrew-tap)
+[![Winget](https://img.shields.io/badge/winget-HecO--CLI.HecO-blue.svg?logo=windows)](https://github.com/microsoft/winget-pkgs/tree/master/manifests/h/HecO-CLI/HecO)
 
 
 `HecO`是用于鸿蒙/HarmomyOS应用开发的命令行工具，并提供便捷的命令行提示及补全，方便鸿蒙应用开发者和AI调用。
@@ -33,6 +34,12 @@
 ```bash
 brew tap heco-cli/tap
 brew install heco
+```
+
+### 使用 Winget 安装（Windows 推荐）
+
+```powershell
+winget install HecO-CLI.HecO -s winget
 ```
 
 ### 从源码安装

@@ -94,3 +94,17 @@ jobs:
           git add $FORMULA_FILE
           git commit -m "chore(release): bump version to ${VERSION} in $FORMULA_FILE"
           git push origin main
+
+  update-winget:
+    name: Update Winget Package
+    needs: upload-assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish to Winget
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: HecO-CLI.HecO
+          installers-regex: '\.zip$'
+          token: ${{ secrets.WINGET_GITHUB_TOKEN }}
+          release-notes-url: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+
